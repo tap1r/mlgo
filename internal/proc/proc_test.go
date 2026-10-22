@@ -1,8 +1,14 @@
 package proc
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kevinadi/mlgo/internal/topology"
 )
 
 func TestIsServer(t *testing.T) {
@@ -55,6 +61,68 @@ func TestFilter(t *testing.T) {
 	// A dot is literal. The old grep path treated it as "any character".
 	if len(Filter(procs, Spec{Criteria: "shard0."})) != 0 {
 		t.Fatal("criteria must not be a regular expression")
+	}
+}
+
+func TestStartStripsForkWhenRejected(t *testing.T) {
+	dir := t.TempDir()
+	data := filepath.Join(dir, topology.DataDir)
+	if err := os.MkdirAll(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nmongod --port 27017 --dbpath /data/db --logpath /data/mongod.log --fork\nmongos --port 27018 --configdb config/localhost:27019 --logpath /data/mongos.log --fork\n"
+	if err := os.WriteFile(filepath.Join(data, "start.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origRejected := forkRejected
+	forkRejected = func() bool { return true }
+	t.Cleanup(func() { forkRejected = origRejected })
+	var got [][]string
+	var ports []int
+	origStart := startBackground
+	startBackground = func(argv []string, port int, timeout time.Duration) (int, error) {
+		got = append(got, append([]string{}, argv...))
+		ports = append(ports, port)
+		if timeout <= 0 {
+			t.Fatal("timeout")
+		}
+		return 7, nil
+	}
+	t.Cleanup(func() { startBackground = origStart })
+
+	t.Chdir(dir)
+	if err := Start(""); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || ports[0] != 27017 || ports[1] != 27018 {
+		t.Fatalf("starts = %v ports %v", got, ports)
+	}
+	for _, argv := range got {
+		if strings.Contains(strings.Join(argv, " "), "--fork") {
+			t.Fatalf("fork flag survived: %v", argv)
+		}
+	}
+}
+
+func TestStripFork(t *testing.T) {
+	got := stripFork([]string{"mongod", "--fork", "--port", "1", "--fork=true"})
+	if strings.Join(got, " ") != "mongod --port 1" {
+		t.Fatalf("%v", got)
+	}
+	if !hasForkFlag([]string{"mongod", "--fork"}) || hasForkFlag([]string{"mongod", "--port", "1"}) {
+		t.Fatal("hasForkFlag")
+	}
+	if runtime.GOOS != "windows" && !shouldDetach([]string{"mongod", "--port", "1"}) {
+		t.Fatal("expected detach")
+	}
+	if runtime.GOOS == "windows" && shouldDetach([]string{"mongod", "--port", "1"}) {
+		t.Fatal("windows uses start /b")
+	}
+	if shouldDetach([]string{"mongod", "--port", "1", "--fork"}) {
+		t.Fatal("forked server should be waited on")
+	}
+	if shouldDetach([]string{"mongodump", "--port", "1"}) {
+		t.Fatal("mongodump is not a server")
 	}
 }
 

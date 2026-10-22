@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kevinadi/mlgo/internal/mongocmd"
 )
 
 func TestRunRejectsBadInput(t *testing.T) {
@@ -53,6 +58,43 @@ func TestShardCfgDeterminesSize(t *testing.T) {
 	if !strings.Contains(body, "--shardsvr") || !strings.Contains(body, "--configsvr") {
 		t.Fatalf("missing server roles:\n%s", body)
 	}
+}
+
+func TestScriptOmitsForkWhenUnsupported(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("fork rejection is a macOS mongod 8.2+ behavior")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	text, err := mongocmd.VersionText(ctx)
+	if err != nil {
+		t.Skip(err)
+	}
+	if mongocmd.ForkSupported("darwin", text) {
+		t.Skip("this mongod still accepts --fork")
+	}
+	body := captureStdout(t, func() error {
+		return run([]string{"st", "-script"})
+	})
+	if scriptPassesFork(body) {
+		t.Fatalf("script still passes --fork:\n%s", body)
+	}
+	if !strings.Contains(body, "setsid") || !strings.Contains(body, "rejects --fork") {
+		t.Fatalf("script:\n%s", body)
+	}
+}
+
+func scriptPassesFork(script string) bool {
+	for _, line := range strings.Split(script, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "--fork") {
+			return true
+		}
+	}
+	return false
 }
 
 func captureStdout(t *testing.T, fn func() error) string {

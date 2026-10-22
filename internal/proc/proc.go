@@ -2,6 +2,7 @@
 package proc
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/kevinadi/mlgo/internal/daemon"
+	"github.com/kevinadi/mlgo/internal/mongocmd"
 	"github.com/kevinadi/mlgo/internal/topology"
 	"github.com/shirou/gopsutil/v4/process"
 )
@@ -247,6 +251,24 @@ func Kill(spec Spec) error {
 	return nil
 }
 
+// startBackground launches a server line that has no --fork. Tests replace it.
+var startBackground = daemon.StartAndWait
+
+// forkRejected reports that this machine's mongod must not be passed --fork.
+// Tests replace it. An unreadable version on darwin is rejected too.
+var forkRejected = func() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	text, err := mongocmd.VersionText(ctx)
+	if err != nil {
+		return true
+	}
+	return !mongocmd.ForkSupported(runtime.GOOS, text)
+}
+
 // Start runs commands from mlgo-data/start.sh. criteria is a literal
 // substring. Matching is not a shell pipeline.
 func Start(criteria string) error {
@@ -281,13 +303,63 @@ func Start(criteria string) error {
 	} else {
 		fmt.Println("Starting", criteria, "...")
 	}
+	rejectFork := forkRejected()
+	if rejectFork {
+		fmt.Fprintln(os.Stderr, "this mongod rejects --fork on macOS; waiting until each server is listening")
+	}
 	for _, argv := range cmds {
+		if rejectFork {
+			argv = stripFork(argv)
+		}
 		fmt.Println(">>>", strings.Join(argv, " "))
-		if err := run(argv); err != nil {
+		var err error
+		if shouldDetach(argv) {
+			err = detach(argv)
+		} else {
+			err = run(argv)
+		}
+		if err != nil {
 			return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
 		}
 	}
 	return nil
+}
+
+func stripFork(argv []string) []string {
+	out := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		if arg == "--fork" || arg == "--fork=true" {
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func hasForkFlag(argv []string) bool {
+	for _, arg := range argv {
+		if arg == "--fork" || arg == "--fork=true" {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldDetach(argv []string) bool {
+	if runtime.GOOS == "windows" || len(argv) == 0 || !isServer(argv[0]) {
+		return false
+	}
+	return !hasForkFlag(argv)
+}
+
+func detach(argv []string) error {
+	parsed := ParseArgs(0, argv)
+	port, err := strconv.Atoi(parsed.Port)
+	if err != nil {
+		return fmt.Errorf("no --port in command")
+	}
+	_, err = startBackground(argv, port, daemon.WaitTimeout)
+	return err
 }
 
 func run(argv []string) error {

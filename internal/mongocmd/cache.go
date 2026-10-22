@@ -52,9 +52,32 @@ func parseRelease(versionText string) (major, minor int, ok bool) {
 	return major, minor, true
 }
 
-// DetectCacheSize runs `mongod --version` and returns the cache size that
-// binary accepts. The error tells the caller to omit the flag.
-func DetectCacheSize(ctx context.Context) (string, error) {
+// ForkSupported reports whether goos can start this mongod with --fork.
+//
+// Windows never uses --fork. MongoDB 8.2 and newer reject it on macOS:
+// fork+exec via --fork is incompatible with the system, and mongod exits
+// before it writes a log. An unreadable version on darwin is treated as
+// unsupported, because passing --fork fails on 8.2+ and a new session still
+// works on older servers. Linux and other Unix systems keep --fork.
+func ForkSupported(goos, versionText string) bool {
+	if goos == "windows" {
+		return false
+	}
+	if goos != "darwin" {
+		return true
+	}
+	major, minor, ok := parseRelease(versionText)
+	if !ok {
+		return false
+	}
+	if major > 8 || (major == 8 && minor >= 2) {
+		return false
+	}
+	return true
+}
+
+// VersionText runs `mongod --version` and returns its stdout.
+func VersionText(ctx context.Context) (string, error) {
 	path, err := exec.LookPath("mongod")
 	if err != nil {
 		return "", fmt.Errorf("mongod is not on PATH")
@@ -63,9 +86,19 @@ func DetectCacheSize(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("mongod --version: %w", err)
 	}
-	size, ok := CacheSizeGB(string(out))
+	return string(out), nil
+}
+
+// DetectCacheSize runs `mongod --version` and returns the cache size that
+// binary accepts. The error tells the caller to omit the flag.
+func DetectCacheSize(ctx context.Context) (string, error) {
+	text, err := VersionText(ctx)
+	if err != nil {
+		return "", err
+	}
+	size, ok := CacheSizeGB(text)
 	if !ok {
-		return "", fmt.Errorf("unrecognized mongod version %q", firstLine(string(out)))
+		return "", fmt.Errorf("unrecognized mongod version %q", firstLine(text))
 	}
 	return size, nil
 }

@@ -76,6 +76,10 @@ mlgo passes `--wiredTigerCacheSizeGB` based on `mongod --version`:
 
 Fractional cache sizes are accepted starting in MongoDB 3.4 (minimum 0.25 GB). 0.5 GB keeps a multi-node test deployment small without going under that minimum.
 
+### Starting the process
+
+On Linux, and on macOS with mongod older than 8.2, mlgo adds `--fork`. MongoDB 8.2 and newer exit immediately on macOS if `--fork` is set: fork+exec is incompatible with the system. mlgo reads the same `mongod --version` output, starts that server in a new session, and waits until the new process is listening. `--script` waits in the shell before the next step. `mlgo start` drops a saved `--fork` from `start.sh` on those servers and waits the same way. Windows still uses `start /b`.
+
 ### Shell
 
 `rs.initiate`, `sh.addShard`, and `createUser` run through `mongosh` when it is on `PATH`, otherwise `mongo`. Readiness is `db.hello().isWritablePrimary` when that command exists, otherwise `isMaster`. Initiate and `addShard` are retried. A failed `mongod` is not retried.

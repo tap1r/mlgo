@@ -15,17 +15,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kevinadi/mlgo/internal/daemon"
 	"github.com/kevinadi/mlgo/internal/mongocmd"
 	"github.com/kevinadi/mlgo/internal/topology"
 )
 
 // Options controls how a deployment is built and run.
 type Options struct {
-	Auth    bool
-	NoInit  bool
-	Script  bool
-	Cache   string
-	Shell   string
+	Auth   bool
+	NoInit bool
+	Script bool
+	Cache  string
+	Shell  string
+	// NoFork starts background mongod and mongos in a new session instead of
+	// passing --fork. It is set on macOS when mongod is 8.2 or newer, or when
+	// that version cannot be read. The zero value keeps --fork on Unix.
+	// Windows ignores it and uses start /b.
+	NoFork  bool
 	Windows bool
 	CWD     string
 }
@@ -42,6 +48,7 @@ const (
 
 // Step is one action. Argv is the real program arguments. --fork and the
 // Windows start wrapper are added when the step runs or is rendered.
+// Port is the server port for a background mongod or mongos.
 type Step struct {
 	Kind       StepKind
 	Argv       []string
@@ -64,6 +71,9 @@ type Executor interface {
 	Run(ctx context.Context, argv []string) error
 	Output(ctx context.Context, argv []string) ([]byte, error)
 }
+
+// startBackground launches a server that cannot use --fork. Tests replace it.
+var startBackground = daemon.StartAndWait
 
 // Local runs commands on this machine.
 type Local struct{}
@@ -133,12 +143,12 @@ func BuildStandalone(port int, opt Options) (Plan, error) {
 	}
 	conn := fmt.Sprintf("localhost:%d", port)
 	return Plan{
-		Summary: []string{
+		Summary: noteFork([]string{
 			fmt.Sprintf("# Port: %d", port),
 			fmt.Sprintf("# Auth: %t", opt.Auth),
 			fmt.Sprintf("# Connection string: %s", conn),
 			cacheSummary(opt.Cache),
-		},
+		}, opt),
 		Steps:   steps,
 		Options: opt,
 		Conn:    conn,
@@ -182,7 +192,7 @@ func BuildReplica(name string, port int, cfg string, num int, cfgSet, numSet boo
 	if opt.NoInit && opt.Auth {
 		summary = append(summary, "# User not created because the replica set is not being initiated")
 	}
-	return Plan{Summary: summary, Steps: steps, Options: opt, Conn: conn}, nil
+	return Plan{Summary: noteFork(summary, opt), Steps: steps, Options: opt, Conn: conn}, nil
 }
 
 // BuildSharded plans a sharded cluster.
@@ -221,6 +231,7 @@ func BuildSharded(port, numShards, nodesPerShard, numConfig int, shardCfg string
 	steps = append(steps, Step{
 		Kind:       StepExec,
 		Background: true,
+		Port:       cluster.MongosPort,
 		Argv:       mongocmd.Mongos(cluster.MongosPort, configDB, filepath.Join(db, "mongos.log"), key),
 	})
 	steps = append(steps, Step{Kind: StepWaitPing, Port: cluster.MongosPort, Label: "mongos"})
@@ -247,7 +258,14 @@ func BuildSharded(port, numShards, nodesPerShard, numConfig int, shardCfg string
 		fmt.Sprintf("# Connection string: %s", conn),
 		cacheSummary(opt.Cache),
 	}
-	return Plan{Summary: summary, Steps: steps, Options: opt, Conn: conn}, nil
+	return Plan{Summary: noteFork(summary, opt), Steps: steps, Options: opt, Conn: conn}, nil
+}
+
+func noteFork(summary []string, opt Options) []string {
+	if opt.NoFork && !opt.Windows {
+		return append(summary, "# Process start: new session, because this mongod rejects --fork")
+	}
+	return summary
 }
 
 func appendMongod(steps []Step, opt Options, port int, replset string, role topology.ServerRole, key string) []Step {
@@ -256,6 +274,7 @@ func appendMongod(steps []Step, opt Options, port int, replset string, role topo
 	steps = append(steps, Step{
 		Kind:       StepExec,
 		Background: true,
+		Port:       port,
 		Argv: mongocmd.Mongod(mongocmd.Node{
 			Port:    port,
 			DBPath:  db,
@@ -324,7 +343,10 @@ func runStep(ctx context.Context, plan Plan, step Step, ex Executor, sleep func(
 }
 
 func runExec(ctx context.Context, plan Plan, step Step, ex Executor, sleep func(time.Duration)) error {
-	argv := ExecArgv(step, plan.Options.Windows)
+	if step.Background && plan.Options.NoFork && !plan.Options.Windows {
+		return runDetached(step)
+	}
+	argv := ExecArgv(step, plan.Options)
 	attempts := step.Retries + 1
 	var err error
 	for i := 0; i < attempts; i++ {
@@ -339,6 +361,18 @@ func runExec(ctx context.Context, plan Plan, step Step, ex Executor, sleep func(
 		sleep(2 * time.Second)
 	}
 	return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+}
+
+func runDetached(step Step) error {
+	if step.Port < 1 || step.Port > 65535 {
+		return fmt.Errorf("background step has no port")
+	}
+	argv := append([]string{}, step.Argv...)
+	fmt.Println(">>>", strings.Join(argv, " "))
+	if _, err := startBackground(argv, step.Port, daemon.WaitTimeout); err != nil {
+		return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+	}
+	return nil
 }
 
 func waitReady(ctx context.Context, ex Executor, shell string, port int, eval, want, label string, sleep func(time.Duration)) error {

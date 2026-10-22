@@ -2,6 +2,32 @@ package mongocmd
 
 import "testing"
 
+func TestForkSupported(t *testing.T) {
+	tests := []struct {
+		goos string
+		text string
+		want bool
+	}{
+		{goos: "linux", text: "db version v9.0.4\n", want: true},
+		{goos: "linux", text: "not a version\n", want: true},
+		{goos: "darwin", text: "db version v8.0.12\n", want: true},
+		{goos: "darwin", text: "db version v8.1.1\n", want: true},
+		{goos: "darwin", text: "db version v7.0.14\n", want: true},
+		{goos: "darwin", text: "db version v8.2.0\n", want: false},
+		{goos: "darwin", text: "db version v8.2.1\n", want: false},
+		{goos: "darwin", text: "db version v9.0.4\n", want: false},
+		{goos: "darwin", text: "not a version\n", want: false},
+		{goos: "windows", text: "db version v4.4.29\n", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos+" "+tt.text, func(t *testing.T) {
+			if got := ForkSupported(tt.goos, tt.text); got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCacheSizeGB(t *testing.T) {
 	tests := []struct {
 		name string

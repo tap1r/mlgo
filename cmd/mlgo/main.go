@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/kevinadi/mlgo/internal/deploy"
@@ -160,25 +161,40 @@ func options(auth, script bool) deploy.Options {
 	if shell == "" {
 		shell = "mongosh"
 	}
+	cache, noFork := serverSettings()
 	return deploy.Options{
 		Auth:    auth,
 		Script:  script,
-		Cache:   cacheSize(),
+		Cache:   cache,
+		NoFork:  noFork,
 		Shell:   shell,
 		Windows: runtime.GOOS == "windows",
 		CWD:     cwd,
 	}
 }
 
-func cacheSize() string {
+func serverSettings() (cache string, noFork bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	size, err := mongocmd.DetectCacheSize(ctx)
+	text, err := mongocmd.VersionText(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "leaving the WiredTiger cache at the server default: %v\n", err)
-		return ""
+	} else if size, ok := mongocmd.CacheSizeGB(text); ok {
+		cache = size
+	} else {
+		fmt.Fprintf(os.Stderr, "leaving the WiredTiger cache at the server default: unrecognized mongod version %q\n", firstLine(text))
 	}
-	return size
+	if runtime.GOOS != "windows" && !mongocmd.ForkSupported(runtime.GOOS, text) {
+		noFork = true
+	}
+	return cache, noFork
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func launch(plan deploy.Plan, err error) error {

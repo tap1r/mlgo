@@ -238,6 +238,102 @@ func TestKeyFileIsRandomAndPrivate(t *testing.T) {
 	}
 }
 
+func TestNoForkDetachesAndOmitsFlag(t *testing.T) {
+	dir := t.TempDir()
+	var started [][]string
+	var ports []int
+	orig := startBackground
+	startBackground = func(argv []string, port int, timeout time.Duration) (int, error) {
+		started = append(started, append([]string{}, argv...))
+		ports = append(ports, port)
+		if timeout <= 0 {
+			t.Fatal("timeout")
+		}
+		return 1, nil
+	}
+	t.Cleanup(func() { startBackground = orig })
+
+	opt := Options{CWD: dir, Shell: "mongosh", Cache: "0.5", NoFork: true}
+	plan, err := BuildSharded(27017, 1, 1, 1, "P", true, false, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := plan.Render()
+	if hasForkArg(script) {
+		t.Fatalf("script passes --fork:\n%s", script)
+	}
+	if !strings.Contains(script, "setsid") || !strings.Contains(script, "port_ready") {
+		t.Fatalf("script does not wait for the server:\n%s", script)
+	}
+	if strings.Count(script, "Starting mongod on port") != 2 || !strings.Contains(script, "Starting mongos on port 27017") {
+		t.Fatalf("script:\n%s", script)
+	}
+	if !strings.Contains(script, "rejects --fork") {
+		t.Fatalf("missing summary:\n%s", script)
+	}
+
+	f := &fake{outputs: []scripted{{out: []byte("true\n")}, {out: []byte("true\n")}, {out: []byte("1\n")}}}
+	if err := Execute(context.Background(), plan, f, f.sleep); err != nil {
+		t.Fatal(err)
+	}
+	if countArg0(f.runs, "mongod") != 0 || countArg0(f.runs, "mongos") != 0 {
+		t.Fatalf("executor ran a server in the foreground: %v", f.runs)
+	}
+	if len(started) != 3 {
+		t.Fatalf("detached starts = %d", len(started))
+	}
+	for _, argv := range started {
+		if strings.Contains(strings.Join(argv, " "), "--fork") {
+			t.Fatalf("detached argv has --fork: %v", argv)
+		}
+	}
+	if ports[0] == 0 || ports[2] != 27017 {
+		t.Fatalf("ports = %v", ports)
+	}
+	start, err := os.ReadFile(filepath.Join(dir, topology.DataDir, "start.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(start)
+	if strings.Contains(text, "--fork") || strings.Contains(text, "nohup") || strings.Contains(text, "setsid") {
+		t.Fatalf("start.sh should be plain argv:\n%s", text)
+	}
+	if strings.Count(text, "\nmongod ") != 2 || !strings.Contains(text, "\nmongos ") {
+		t.Fatalf("start.sh = %s", text)
+	}
+}
+
+func hasForkArg(script string) bool {
+	for _, line := range strings.Split(script, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "--fork") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestExecArgvForkFlag(t *testing.T) {
+	step := Step{Background: true, Argv: []string{"mongod", "--port", "27017"}}
+	if !strings.Contains(strings.Join(ExecArgv(step, Options{}), " "), "--fork") {
+		t.Fatal("unix argv lost --fork")
+	}
+	if strings.Contains(strings.Join(ExecArgv(step, Options{NoFork: true}), " "), "--fork") {
+		t.Fatal("NoFork argv still has --fork")
+	}
+	win := strings.Join(ExecArgv(step, Options{Windows: true, NoFork: true}), " ")
+	if !strings.Contains(win, "start /b") || strings.Contains(win, "--fork") {
+		t.Fatalf("windows argv = %s", win)
+	}
+	saved := strings.Join(CommandArgv(step, Options{}), " ")
+	if !strings.Contains(saved, "--fork") {
+		t.Fatal("start.sh line lost --fork")
+	}
+}
+
 func TestOutputSaysDoesNotTreatFalseAsTrue(t *testing.T) {
 	if outputSays([]byte("false\n"), "true") {
 		t.Fatal("false contains the letters true")

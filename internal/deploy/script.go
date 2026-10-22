@@ -12,30 +12,38 @@ import (
 )
 
 // ExecArgv is the argv passed to the operating system for a step.
-func ExecArgv(step Step, windows bool) []string {
+// A background step on Unix gets --fork unless Options.NoFork is set.
+// Windows uses start /b either way. The NoFork path does not go through
+// ExecArgv: the caller detaches the process itself.
+func ExecArgv(step Step, opt Options) []string {
 	argv := append([]string{}, step.Argv...)
 	if step.Background {
-		if windows {
+		switch {
+		case opt.Windows:
 			argv = append([]string{"start", "/b"}, argv...)
-		} else {
+		case !opt.NoFork:
 			argv = append(argv, "--fork")
 		}
 	}
-	if windows {
+	if opt.Windows {
 		argv = append([]string{"cmd", "/c"}, argv...)
 	}
 	return argv
 }
 
-// CommandArgv is the argv as it appears in a shell script. The script is
-// already interpreted by a shell, so the Windows cmd /c wrapper is omitted.
-func CommandArgv(step Step, windows bool) []string {
+// CommandArgv is the argv as it appears in start.sh. The script is already
+// interpreted by a shell, so the Windows cmd /c wrapper is omitted. When
+// NoFork is set the line is the plain server argv: `mlgo start` detaches it.
+func CommandArgv(step Step, opt Options) []string {
 	argv := append([]string{}, step.Argv...)
 	if !step.Background {
 		return argv
 	}
-	if windows {
+	if opt.Windows {
 		return append([]string{"start", "/b"}, argv...)
+	}
+	if opt.NoFork {
+		return argv
 	}
 	return append(argv, "--fork")
 }
@@ -56,6 +64,9 @@ func (p Plan) Render() string {
 		fmt.Fprintf(&b, "%s\n", line)
 	}
 	fmt.Fprintln(&b)
+	if p.detachInShell() {
+		b.WriteString(detachHelpers)
+	}
 	for _, step := range p.Steps {
 		switch step.Kind {
 		case StepKeyFile:
@@ -65,7 +76,11 @@ func (p Plan) Render() string {
 		case StepWaitPing:
 			fmt.Fprintln(&b, waitScript(p.Options.Shell, step.Port, mongocmd.PingEval, "1", step.Label))
 		case StepExec:
-			line := formatArgv(CommandArgv(step, p.Options.Windows))
+			if step.Background && p.detachInShell() {
+				fmt.Fprintln(&b, detachScript(step))
+				continue
+			}
+			line := formatArgv(CommandArgv(step, p.Options))
 			if step.Retries > 0 {
 				fmt.Fprintln(&b, retryScript(line, step.Retries+1))
 			} else {
@@ -74,6 +89,92 @@ func (p Plan) Render() string {
 		}
 	}
 	return b.String()
+}
+
+func (p Plan) detachInShell() bool {
+	return p.Options.NoFork && !p.Options.Windows
+}
+
+// detachHelpers backgrounds a server in a new session and waits until that
+// process is listening. A bare `nohup ... &` returns before mongod accepts
+// connections, so the next step (rs.initiate, sh.addShard) would race it.
+const detachHelpers = `start_detached() {
+  # exec so $! is the server. A child perl would leave $! on the shell,
+  # and the listen check would watch the wrong pid.
+  if command -v perl >/dev/null 2>&1; then
+    exec perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die $!' "$@"
+  elif command -v python3 >/dev/null 2>&1; then
+    exec python3 -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+  else
+    exec nohup "$@"
+  fi
+}
+
+port_ready() {
+  port=$1
+  pid=$2
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  if command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
+`
+
+func detachScript(step Step) string {
+	argv := append([]string{}, step.Argv...)
+	line := formatArgv(argv)
+	name := "server"
+	if len(argv) > 0 {
+		name = filepath.Base(argv[0])
+	}
+	log := flagValue(argv, "--logpath")
+	redir := ">/dev/null 2>&1"
+	tail := ""
+	if log != "" {
+		quoted := shellquote.Quote(log)
+		redir = ">>" + quoted + " 2>&1"
+		tail = "\n    tail -n 40 " + quoted + " >&2"
+	}
+	return fmt.Sprintf(`echo "Starting %s on port %d..."
+start_detached %s %s &
+pid=$!
+ok=0
+i=0
+while [ "$i" -lt 120 ]; do
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "%s exited before listening on port %d" >&2%s
+    exit 1
+  fi
+  if port_ready %d "$pid"; then
+    ok=1
+    break
+  fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$ok" -ne 1 ]; then
+  echo "%s not listening on port %d after 120 seconds (pid $pid)" >&2%s
+  exit 1
+fi`, name, step.Port, line, redir, name, step.Port, tail, step.Port, name, step.Port, tail)
+}
+
+func flagValue(argv []string, name string) string {
+	prefix := name + "="
+	for i, arg := range argv {
+		if arg == name && i+1 < len(argv) {
+			return argv[i+1]
+		}
+		if strings.HasPrefix(arg, prefix) {
+			return strings.TrimPrefix(arg, prefix)
+		}
+	}
+	return ""
 }
 
 func keyFileScript(path string) string {
@@ -131,7 +232,7 @@ func WriteStartScript(plan Plan) error {
 		if !step.Background {
 			continue
 		}
-		fmt.Fprintln(&b, formatArgv(CommandArgv(step, plan.Options.Windows)))
+		fmt.Fprintln(&b, formatArgv(CommandArgv(step, plan.Options)))
 	}
 	path := filepath.Join(dir, "start.sh")
 	return os.WriteFile(path, []byte(b.String()), 0o755)
