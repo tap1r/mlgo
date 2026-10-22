@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"github.com/kevinadi/mlgo/internal/deploy"
+	"github.com/kevinadi/mlgo/internal/proc"
 )
 
 var (
@@ -54,12 +55,7 @@ func run(args []string) error {
 
 	if len(args) < 1 {
 		fmt.Print(usage())
-		if ps := Util_ps(""); ps != "" {
-			fmt.Println(Util_ps_pretty())
-		} else {
-			fmt.Println("No running processes")
-		}
-		return nil
+		return printProcesses()
 	}
 
 	switch args[0] {
@@ -68,25 +64,18 @@ func run(args []string) error {
 		if len(args) == 2 {
 			where = args[1]
 		}
-		fmt.Println(Util_install_m(where))
+		fmt.Println(installM(where))
 		return nil
 	case "start":
 		what := ""
 		if len(args) == 2 {
 			what = args[1]
 		}
-		Util_start_process(what)
-		return nil
+		return proc.Start(what)
 	case "kill", "stop":
-		what := ""
-		if len(args) == 2 {
-			what = args[1]
-		}
-		Util_kill(what)
-		return nil
+		return proc.Kill(killSpec(args))
 	case "rm":
-		Util_rm()
-		return nil
+		return proc.RemoveData()
 	case "standalone", "st":
 		standaloneCommand.Parse(args[1:])
 	case "replset", "rs":
@@ -187,7 +176,7 @@ func usage() string {
 	text += "  kill/stop [all|criteria] -- kill running mongod/mongos under the current directory\n"
 	text += "  rm -- remove the data directory\n"
 	text += "\n"
-	text += "  [criteria] for ps, start, and kill is an expression that will restrict the output or operations of the command\n"
+	text += "  [criteria] for start and kill is a literal substring of the command, or an exact pid, port, or replica set name\n"
 	text += "\n"
 	text += "Examples:\n"
 	text += "  mlgo rs                # Start a basic single-node replica set\n"
@@ -197,4 +186,37 @@ func usage() string {
 	text += "  mlgo sh                # Start a basic 2 shards, 1 node per shard, 1 config server\n"
 	text += "  mlgo sh -shardcfg PSA  # Start a 2 shards, PSA configuration on shards, 1 config server\n"
 	return text
+}
+
+func printProcesses() error {
+	procs, err := proc.List()
+	if err != nil {
+		fmt.Println("No running processes")
+		return nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	fmt.Print(proc.Format(procs, cwd))
+	return nil
+}
+
+func killSpec(args []string) proc.Spec {
+	if len(args) < 2 {
+		cwd, _ := os.Getwd()
+		return proc.Spec{CWD: cwd}
+	}
+	if args[1] == "all" {
+		return proc.Spec{All: true}
+	}
+	return proc.Spec{Criteria: args[1]}
+}
+
+func installM(where string) string {
+	cmdline := "curl https://raw.githubusercontent.com/aheckmann/m/master/bin/m"
+	if where != "" {
+		return cmdline + " > " + where + "/m && chmod 755 " + where + "/m"
+	}
+	return cmdline + " > /usr/local/bin/m && chmod 755 /usr/local/bin/m"
 }
