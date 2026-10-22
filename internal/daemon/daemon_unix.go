@@ -55,8 +55,7 @@ func StartAndWait(argv []string, port int, timeout time.Duration) (int, error) {
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return pid, fmt.Errorf("still starting on port %d after %s (pid %d); left the process running\nlog: %s",
-				port, timeout, pid, argValue(argv, "--logpath"))
+			return pid, timeoutError(port, timeout, pid, buf.String(), readTail(argValue(argv, "--logpath"), 4<<10))
 		}
 		wait := 200 * time.Millisecond
 		if remaining < wait {
@@ -76,6 +75,14 @@ func exitError(port int, err error, stderr, log string) error {
 	if err == nil {
 		err = fmt.Errorf("exit 0")
 	}
+	return withDetail(fmt.Errorf("server on port %d exited: %w", port, err), stderr, log)
+}
+
+func timeoutError(port int, timeout time.Duration, pid int, stderr, log string) error {
+	return withDetail(fmt.Errorf("still starting on port %d after %s (pid %d); left the process running", port, timeout, pid), stderr, log)
+}
+
+func withDetail(err error, stderr, log string) error {
 	msg := strings.TrimSpace(stderr)
 	log = strings.TrimSpace(log)
 	switch {
@@ -85,9 +92,9 @@ func exitError(port int, err error, stderr, log string) error {
 		msg = log
 	}
 	if msg == "" {
-		return fmt.Errorf("server on port %d exited: %w", port, err)
+		return err
 	}
-	return fmt.Errorf("server on port %d exited: %w\n%s", port, err, msg)
+	return fmt.Errorf("%w\n%s", err, msg)
 }
 
 func pidListening(pid, port int) bool {

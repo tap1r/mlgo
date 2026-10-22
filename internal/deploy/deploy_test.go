@@ -271,6 +271,15 @@ func TestNoForkDetachesAndOmitsFlag(t *testing.T) {
 	if !strings.Contains(script, "rejects --fork") {
 		t.Fatalf("missing summary:\n%s", script)
 	}
+	if strings.Contains(script, "mongod.log 2>&1") || strings.Contains(script, "mongos.log 2>&1") {
+		t.Fatalf("script appends onto --logpath:\n%s", script)
+	}
+	if !strings.Contains(script, "mongod.log.launch") || !strings.Contains(script, "mongos.log.launch") {
+		t.Fatalf("script missing launch sidecar:\n%s", script)
+	}
+	if strings.Contains(script, "grep -q -w") || !strings.Contains(script, "grep -q -x -F --") {
+		t.Fatalf("readiness grep is not a whole line:\n%s", script)
+	}
 
 	f := &fake{outputs: []scripted{{out: []byte("true\n")}, {out: []byte("true\n")}, {out: []byte("1\n")}}}
 	if err := Execute(context.Background(), plan, f, f.sleep); err != nil {
@@ -300,6 +309,23 @@ func TestNoForkDetachesAndOmitsFlag(t *testing.T) {
 	}
 	if strings.Count(text, "\nmongod ") != 2 || !strings.Contains(text, "\nmongos ") {
 		t.Fatalf("start.sh = %s", text)
+	}
+	info, err := os.Stat(filepath.Join(dir, topology.DataDir, "start.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&0o111 != 0 {
+		t.Fatalf("start.sh is executable: %v", info.Mode())
+	}
+}
+
+func TestWaitScriptMatchesWholeLine(t *testing.T) {
+	got := waitScript("mongo", 27017, "print(1)", "1", "mongod")
+	if !strings.Contains(got, "grep -q -x -F -- 1") {
+		t.Fatalf("wait script = %s", got)
+	}
+	if strings.Contains(got, "grep -q -w") {
+		t.Fatalf("word match would treat \"exiting with code 1\" as ready:\n%s", got)
 	}
 }
 

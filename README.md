@@ -80,10 +80,12 @@ Fractional cache sizes are accepted starting in MongoDB 3.4 (minimum 0.25 GB). 0
 
 On Linux, and on macOS with mongod older than 8.2, mlgo adds `--fork`. MongoDB 8.2 and newer exit immediately on macOS if `--fork` is set: fork+exec is incompatible with the system. mlgo reads the same `mongod --version` output, starts that server in a new session, and waits until the new process is listening. `--script` waits in the shell before the next step. `mlgo start` drops a saved `--fork` from `start.sh` on those servers and waits the same way. Windows still uses `start /b`.
 
+`mlgo-data/start.sh` is the argv list for `mlgo start`. It is not executable. Running it as a shell script blocks on the first server when `--fork` is omitted.
+
 ### Shell
 
 `rs.initiate`, `sh.addShard`, and `createUser` run through `mongosh` when it is on `PATH`, otherwise `mongo`. Readiness is `db.hello().isWritablePrimary` when that command exists, otherwise `isMaster`. Initiate and `addShard` are retried. A failed `mongod` is not retried.
 
 ## Data directory
 
-Each node uses `mlgo-data/<port>/`. `mlgo start` reruns the `mongod` and `mongos` lines saved in `mlgo-data/start.sh`. `mlgo rm` deletes `mlgo-data` only when no server from this directory is still running.
+Each node uses `mlgo-data/<port>/`. `mlgo start` reruns the `mongod` and `mongos` lines saved in `mlgo-data/start.sh`. Do not execute `start.sh` directly. `mlgo rm` deletes `mlgo-data` only when no server from this directory is still running.

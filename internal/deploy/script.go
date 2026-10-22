@@ -137,9 +137,12 @@ func detachScript(step Step) string {
 	redir := ">/dev/null 2>&1"
 	tail := ""
 	if log != "" {
+		// Keep early stderr off --logpath. mongod renames or truncates that
+		// file when it opens it, which drops the lines we just appended.
+		launch := shellquote.Quote(log + ".launch")
 		quoted := shellquote.Quote(log)
-		redir = ">>" + quoted + " 2>&1"
-		tail = "\n    tail -n 40 " + quoted + " >&2"
+		redir = ">>" + launch + " 2>&1"
+		tail = "\n    tail -n 40 " + launch + " >&2\n    tail -n 40 " + quoted + " >&2"
 	}
 	return fmt.Sprintf(`echo "Starting %s on port %d..."
 start_detached %s %s &
@@ -207,7 +210,7 @@ func waitScript(shell string, port int, eval, want, label string) string {
 ok=0
 i=0
 while [ "$i" -lt 20 ]; do
-  if %s | grep -q -w %s; then
+  if %s | grep -q -x -F -- %s; then
     ok=1
     break
   fi
@@ -220,14 +223,16 @@ if [ "$ok" -ne 1 ]; then
 fi`, label, probe, shellquote.Quote(want), label, port)
 }
 
-// WriteStartScript writes the mongod and mongos lines used by `mlgo start`.
+// WriteStartScript writes the mongod and mongos argv used by `mlgo start`.
+// The file is not executable. Running it as a shell script would block on
+// the first server when that server has no --fork.
 func WriteStartScript(plan Plan) error {
 	dir := filepath.Join(plan.Options.CWD, topology.DataDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	var b strings.Builder
-	b.WriteString("#!/bin/sh\n")
+	b.WriteString("# argv for `mlgo start`. Do not execute this file.\n")
 	for _, step := range plan.Steps {
 		if !step.Background {
 			continue
@@ -235,5 +240,5 @@ func WriteStartScript(plan Plan) error {
 		fmt.Fprintln(&b, formatArgv(CommandArgv(step, plan.Options)))
 	}
 	path := filepath.Join(dir, "start.sh")
-	return os.WriteFile(path, []byte(b.String()), 0o755)
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }

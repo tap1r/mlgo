@@ -65,6 +65,9 @@ func TestFilter(t *testing.T) {
 }
 
 func TestStartStripsForkWhenRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows starts through start /b and does not detach")
+	}
 	dir := t.TempDir()
 	data := filepath.Join(dir, topology.DataDir)
 	if err := os.MkdirAll(data, 0o755); err != nil {
