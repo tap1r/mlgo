@@ -28,7 +28,7 @@ rm                        remove mlgo-data when nothing from it is running
 
 With no arguments, mlgo prints this help and the mongod and mongos processes it can see.
 
-`criteria` is a literal substring of the command line, or an exact pid, port, or replica set name. It is not a regular expression.
+`start` criteria is a literal substring of a line in `mlgo-data/start.sh`. `kill` criteria is an exact pid, port, or replica set name, or a literal substring of the command line. Neither is a regular expression.
 
 Shared flags: `-port` (default 27017), `-auth`, `-script`.
 
@@ -72,7 +72,8 @@ mlgo passes `--wiredTigerCacheSizeGB` based on `mongod --version`:
 | --- | --- |
 | 3.4 and newer | `0.5` |
 | 3.0, 3.1, 3.2, 3.3 | `1` |
-| older, or version not detected | flag omitted; mongod keeps its own default |
+| older than 3.0 | flag omitted; the message names that version |
+| version not detected | flag omitted; the message says the version is unrecognized |
 
 Fractional cache sizes are accepted starting in MongoDB 3.4 (minimum 0.25 GB). 0.5 GB keeps a multi-node test deployment small without going under that minimum.
 

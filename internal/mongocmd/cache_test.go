@@ -1,6 +1,9 @@
 package mongocmd
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestForkSupported(t *testing.T) {
 	tests := []struct {
@@ -25,6 +28,19 @@ func TestForkSupported(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCacheOmitReason(t *testing.T) {
+	old := CacheOmitReason("db version v2.6.12\n")
+	if old != "mongod db version v2.6.12 is older than 3.0" {
+		t.Fatalf("old = %q", old)
+	}
+	if got := CacheOmitReason("not a version\n"); !strings.Contains(got, "unrecognized mongod version") {
+		t.Fatalf("unknown = %q", got)
+	}
+	if got := CacheOmitReason("db version v4.4.29\n"); got != "" {
+		t.Fatalf("supported = %q", got)
 	}
 }
 

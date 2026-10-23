@@ -12,6 +12,43 @@ import (
 	"github.com/kevinadi/mlgo/internal/mongocmd"
 )
 
+func TestUsageSeparatesStartAndKill(t *testing.T) {
+	text := usage()
+	if strings.Contains(text, "criteria is a literal substring of the command, or an exact pid") {
+		t.Fatalf("start and kill share one criteria sentence:\n%s", text)
+	}
+	if !strings.Contains(text, "start criteria matches a literal substring") || !strings.Contains(text, "kill criteria is an exact pid") {
+		t.Fatalf("usage =\n%s", text)
+	}
+	if !strings.Contains(text, "-shardcfg and -shardsvr") {
+		t.Fatalf("usage =\n%s", text)
+	}
+}
+
+func TestFlagErrorIsPrintedOnce(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	runErr := run([]string{"rs", "-3"})
+	writeError(runErr)
+	w.Close()
+	os.Stderr = old
+	body, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runErr == nil || !isShown(runErr) {
+		t.Fatalf("err = %v", runErr)
+	}
+	n := strings.Count(string(body), "flag provided but not defined: -3")
+	if n != 1 {
+		t.Fatalf("printed %d times:\n%s", n, body)
+	}
+}
+
 func TestRunRejectsBadInput(t *testing.T) {
 	if err := run([]string{"install-m"}); err == nil {
 		t.Fatal("install-m was removed")

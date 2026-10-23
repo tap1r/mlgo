@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/kevinadi/mlgo/internal/deploy"
@@ -22,9 +22,27 @@ var (
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		writeError(err)
 		os.Exit(1)
 	}
+}
+
+// shownError is a flag parse error that FlagSet already wrote to stderr.
+type shownError struct{ err error }
+
+func (e shownError) Error() string { return e.err.Error() }
+func (e shownError) Unwrap() error { return e.err }
+
+func isShown(err error) bool {
+	var shown shownError
+	return errors.As(err, &shown)
+}
+
+func writeError(err error) {
+	if err == nil || isShown(err) {
+		return
+	}
+	fmt.Fprintln(os.Stderr, err)
 }
 
 func run(args []string) error {
@@ -89,7 +107,7 @@ func parseSet(fs *flag.FlagSet, args []string) (help bool, err error) {
 		if err == flag.ErrHelp {
 			return true, nil
 		}
-		return false, err
+		return false, shownError{err: err}
 	}
 	if fs.NArg() != 0 {
 		return false, fmt.Errorf("unexpected argument %q", fs.Arg(0))
@@ -182,19 +200,12 @@ func serverSettings() (cache string, noFork bool) {
 	} else if size, ok := mongocmd.CacheSizeGB(text); ok {
 		cache = size
 	} else {
-		fmt.Fprintf(os.Stderr, "leaving the WiredTiger cache at the server default: unrecognized mongod version %q\n", firstLine(text))
+		fmt.Fprintf(os.Stderr, "leaving the WiredTiger cache at the server default: %s\n", mongocmd.CacheOmitReason(text))
 	}
 	if runtime.GOOS != "windows" && !mongocmd.ForkSupported(runtime.GOOS, text) {
 		noFork = true
 	}
 	return cache, noFork
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 func launch(plan deploy.Plan, err error) error {
@@ -266,11 +277,13 @@ func usage() string {
 	text += "  kill|stop [all|criteria]  signal mongod/mongos (default: this directory)\n"
 	text += "  rm                     remove mlgo-data when nothing is running\n"
 	text += "\n"
-	text += "  criteria is a literal substring of the command, or an exact pid, port, or replica set name\n"
+	text += "  start criteria matches a literal substring of a line in mlgo-data/start.sh\n"
+	text += "  kill criteria is an exact pid, port, or replica set name, or a literal substring of the command\n"
 	text += "  start.sh is saved argv for `mlgo start`. Do not execute that file.\n"
 	text += "\n"
 	text += "  -cfg and -shardcfg take P, then any number of S, then any number of A or H.\n"
-	text += "  When both -cfg and -num are set they must describe the same number of members.\n"
+	text += "  For a replica set, -cfg and -num must describe the same number of members when both are set.\n"
+	text += "  For a sharded cluster, -shardcfg and -shardsvr must describe the same number of members when both are set.\n"
 	text += "\n"
 	text += "Examples:\n"
 	text += "  mlgo rs                         # one-node replica set on port 27017\n"

@@ -98,9 +98,21 @@ func DetectCacheSize(ctx context.Context) (string, error) {
 	}
 	size, ok := CacheSizeGB(text)
 	if !ok {
-		return "", fmt.Errorf("unrecognized mongod version %q", firstLine(text))
+		return "", fmt.Errorf("%s", CacheOmitReason(text))
 	}
 	return size, nil
+}
+
+// CacheOmitReason explains why --wiredTigerCacheSizeGB is left unset.
+// A parsed release older than 3.0 is not an unrecognized version.
+func CacheOmitReason(versionText string) string {
+	if _, ok := CacheSizeGB(versionText); ok {
+		return ""
+	}
+	if _, _, ok := parseRelease(versionText); ok {
+		return "mongod " + firstLine(versionText) + " is older than 3.0"
+	}
+	return fmt.Sprintf("unrecognized mongod version %q", firstLine(versionText))
 }
 
 func firstLine(s string) string {
