@@ -97,6 +97,12 @@ func withDetail(err error, stderr, log string) error {
 	return fmt.Errorf("%w\n%s", err, msg)
 }
 
+// StartDetached is the Windows launcher. Unix starts a server with
+// StartAndWait or with --fork.
+func StartDetached(argv []string) (int, error) {
+	return 0, fmt.Errorf("detached Windows start is not used on this system")
+}
+
 func pidListening(pid, port int) bool {
 	proc, err := process.NewProcess(int32(pid))
 	if err != nil {

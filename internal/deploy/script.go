@@ -13,36 +13,23 @@ import (
 
 // ExecArgv is the argv passed to the operating system for a step.
 // A background step on Unix gets --fork unless Options.NoFork is set.
-// Windows uses start /b either way. The NoFork path does not go through
-// ExecArgv: the caller detaches the process itself.
+// Windows and the NoFork path do not go through ExecArgv: the caller
+// starts the server itself. Paths are never handed to cmd.exe, which
+// would treat & and % in a dbpath as shell syntax.
 func ExecArgv(step Step, opt Options) []string {
 	argv := append([]string{}, step.Argv...)
-	if step.Background {
-		switch {
-		case opt.Windows:
-			argv = append([]string{"start", "/b"}, argv...)
-		case !opt.NoFork:
-			argv = append(argv, "--fork")
-		}
-	}
-	if opt.Windows {
-		argv = append([]string{"cmd", "/c"}, argv...)
+	if step.Background && !opt.Windows && !opt.NoFork {
+		argv = append(argv, "--fork")
 	}
 	return argv
 }
 
-// CommandArgv is the argv as it appears in start.sh. The script is already
-// interpreted by a shell, so the Windows cmd /c wrapper is omitted. When
-// NoFork is set the line is the plain server argv: `mlgo start` detaches it.
+// CommandArgv is the argv as it appears in start.sh. `mlgo start` parses
+// the line and launches it. Windows lines are the same plain argv: a
+// start /b wrapper would be re-parsed by cmd.exe.
 func CommandArgv(step Step, opt Options) []string {
 	argv := append([]string{}, step.Argv...)
-	if !step.Background {
-		return argv
-	}
-	if opt.Windows {
-		return append([]string{"start", "/b"}, argv...)
-	}
-	if opt.NoFork {
+	if !step.Background || opt.Windows || opt.NoFork {
 		return argv
 	}
 	return append(argv, "--fork")

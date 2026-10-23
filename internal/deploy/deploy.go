@@ -30,7 +30,7 @@ type Options struct {
 	// NoFork starts background mongod and mongos in a new session instead of
 	// passing --fork. It is set on macOS when mongod is 8.2 or newer, or when
 	// that version cannot be read. The zero value keeps --fork on Unix.
-	// Windows ignores it and uses start /b.
+	// Windows always starts the server directly and ignores NoFork.
 	NoFork  bool
 	Windows bool
 	CWD     string
@@ -74,6 +74,9 @@ type Executor interface {
 
 // startBackground launches a server that cannot use --fork. Tests replace it.
 var startBackground = daemon.StartAndWait
+
+// startDetached launches a Windows server without cmd.exe. Tests replace it.
+var startDetached = daemon.StartDetached
 
 // Local runs commands on this machine.
 type Local struct{}
@@ -343,8 +346,11 @@ func runStep(ctx context.Context, plan Plan, step Step, ex Executor, sleep func(
 }
 
 func runExec(ctx context.Context, plan Plan, step Step, ex Executor, sleep func(time.Duration)) error {
-	if step.Background && plan.Options.NoFork && !plan.Options.Windows {
-		return runDetached(step)
+	if step.Background && (plan.Options.Windows || plan.Options.NoFork) {
+		return runDetached(step, plan.Options.Windows)
+	}
+	if plan.Options.Windows && len(step.Argv) > 0 && filepath.Base(step.Argv[0]) == "mkdir" {
+		return os.MkdirAll(step.Argv[len(step.Argv)-1], 0o755)
 	}
 	argv := ExecArgv(step, plan.Options)
 	attempts := step.Retries + 1
@@ -363,12 +369,18 @@ func runExec(ctx context.Context, plan Plan, step Step, ex Executor, sleep func(
 	return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
 }
 
-func runDetached(step Step) error {
+func runDetached(step Step, windows bool) error {
+	argv := append([]string{}, step.Argv...)
+	fmt.Println(">>>", strings.Join(argv, " "))
+	if windows {
+		if _, err := startDetached(argv); err != nil {
+			return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+		}
+		return nil
+	}
 	if step.Port < 1 || step.Port > 65535 {
 		return fmt.Errorf("background step has no port")
 	}
-	argv := append([]string{}, step.Argv...)
-	fmt.Println(">>>", strings.Join(argv, " "))
 	if _, err := startBackground(argv, step.Port, daemon.WaitTimeout); err != nil {
 		return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
 	}

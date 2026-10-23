@@ -310,6 +310,9 @@ func Kill(spec Spec) error {
 // startBackground launches a server line that has no --fork. Tests replace it.
 var startBackground = daemon.StartAndWait
 
+// startDetached launches a Windows server without cmd.exe. Tests replace it.
+var startDetached = daemon.StartDetached
+
 // forkRejected reports that this machine's mongod must not be passed --fork.
 // Tests replace it. An unreadable version on darwin is rejected too.
 var forkRejected = func() bool {
@@ -420,12 +423,34 @@ func detach(argv []string) error {
 
 func run(argv []string) error {
 	if runtime.GOOS == "windows" {
-		argv = append([]string{"cmd", "/c"}, argv...)
+		detach, direct := launchDirect(argv)
+		if detach {
+			_, err := startDetached(direct)
+			return err
+		}
+		argv = direct
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// launchDirect strips a legacy `start /b` prefix. A server is started
+// with CreateProcess so cmd.exe cannot split the path on & or %.
+func launchDirect(argv []string) (detach bool, out []string) {
+	out = stripStartBuiltin(argv)
+	if len(out) > 0 && isServer(out[0]) {
+		return true, out
+	}
+	return false, out
+}
+
+func stripStartBuiltin(argv []string) []string {
+	if len(argv) >= 3 && argv[0] == "start" && strings.EqualFold(argv[1], "/b") {
+		return append([]string{}, argv[2:]...)
+	}
+	return argv
 }
 
 // RemoveData deletes mlgo-data. It refuses when a server is still using it.

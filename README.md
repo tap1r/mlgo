@@ -78,7 +78,7 @@ Fractional cache sizes are accepted starting in MongoDB 3.4 (minimum 0.25 GB). 0
 
 ### Starting the process
 
-On Linux, and on macOS with mongod older than 8.2, mlgo adds `--fork`. MongoDB 8.2 and newer exit immediately on macOS if `--fork` is set: fork+exec is incompatible with the system. mlgo reads the same `mongod --version` output, starts that server in a new session, and waits until the new process is listening. `--script` waits in the shell before the next step. `mlgo start` drops a saved `--fork` from `start.sh` on those servers and waits the same way. Windows still uses `start /b`.
+On Linux, and on macOS with mongod older than 8.2, mlgo adds `--fork`. MongoDB 8.2 and newer exit immediately on macOS if `--fork` is set: fork+exec is incompatible with the system. mlgo reads the same `mongod --version` output, starts that server in a new session, and waits until the new process is listening. `--script` waits in the shell before the next step. `mlgo start` drops a saved `--fork` from `start.sh` on those servers and waits the same way. Windows starts the server process directly, in a new process group, and does not pass the command through `cmd.exe`. A path that contains `&` or `%` stays one argument.
 
 `mlgo-data/start.sh` is the argv list for `mlgo start`. It is not executable. Running it as a shell script blocks on the first server when `--fork` is omitted.
 

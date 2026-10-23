@@ -167,6 +167,21 @@ func TestStartStripsForkWhenRejected(t *testing.T) {
 	}
 }
 
+func TestWindowsLaunchSkipsCmd(t *testing.T) {
+	detach, argv := launchDirect([]string{"start", "/b", "mongod", "--dbpath", `C:\a&b%c`, "--port", "1"})
+	if !detach {
+		t.Fatal("expected a direct server launch")
+	}
+	joined := strings.Join(argv, " ")
+	if argv[0] != "mongod" || !strings.Contains(joined, `C:\a&b%c`) || strings.Contains(joined, "cmd") {
+		t.Fatalf("%q", argv)
+	}
+	plain, rest := launchDirect([]string{"mongod", "--port", "1"})
+	if !plain || len(rest) != 3 {
+		t.Fatalf("%v %q", plain, rest)
+	}
+}
+
 func TestStripFork(t *testing.T) {
 	got := stripFork([]string{"mongod", "--fork", "--port", "1", "--fork=true"})
 	if strings.Join(got, " ") != "mongod --port 1" {

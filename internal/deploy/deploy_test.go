@@ -339,6 +339,37 @@ func TestScriptStopsOnFailure(t *testing.T) {
 	}
 }
 
+func TestWindowsLaunchKeepsMetacharacters(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a&b%c")
+	var got [][]string
+	orig := startDetached
+	startDetached = func(argv []string) (int, error) {
+		got = append(got, append([]string{}, argv...))
+		return 4, nil
+	}
+	t.Cleanup(func() { startDetached = orig })
+
+	opt := Options{CWD: dir, Shell: "mongosh", Cache: "1", Windows: true}
+	plan, err := BuildStandalone(27017, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), plan, &fake{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0][0] == "cmd" || got[0][0] == "start" {
+		t.Fatalf("detached = %#v", got)
+	}
+	joined := strings.Join(got[0], " ")
+	if !strings.Contains(joined, "a&b%c") || strings.Contains(joined, "cmd /c") {
+		t.Fatalf("argv = %q", got[0])
+	}
+	db := filepath.Join(dir, topology.DataDir, "27017")
+	if _, err := os.Stat(db); err != nil {
+		t.Fatalf("mkdir did not create %s: %v", db, err)
+	}
+}
+
 func TestWaitScriptMatchesWholeLine(t *testing.T) {
 	got := waitScript("mongo", 27017, "print(1)", "1", "mongod")
 	if !strings.Contains(got, "grep -q -x -F -- 1") {
@@ -371,8 +402,12 @@ func TestExecArgvForkFlag(t *testing.T) {
 		t.Fatal("NoFork argv still has --fork")
 	}
 	win := strings.Join(ExecArgv(step, Options{Windows: true, NoFork: true}), " ")
-	if !strings.Contains(win, "start /b") || strings.Contains(win, "--fork") {
+	if strings.Contains(win, "start /b") || strings.Contains(win, "cmd") || strings.Contains(win, "--fork") {
 		t.Fatalf("windows argv = %s", win)
+	}
+	savedWin := strings.Join(CommandArgv(step, Options{Windows: true}), " ")
+	if strings.Contains(savedWin, "start /b") || strings.Contains(savedWin, "--fork") {
+		t.Fatalf("windows start.sh line = %s", savedWin)
 	}
 	saved := strings.Join(CommandArgv(step, Options{}), " ")
 	if !strings.Contains(saved, "--fork") {
