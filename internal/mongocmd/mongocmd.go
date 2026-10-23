@@ -93,8 +93,9 @@ func Shell(bin string, port int, eval string) []string {
 
 const (
 	// HelloEval prints true when this member or mongos can take writes.
-	// db.hello is used when it exists; older shells fall back to isMaster.
-	HelloEval = `var h=(db.hello||db.isMaster).call(db); print(!!(h.isWritablePrimary||h.ismaster));`
+	// typeof rejects the legacy shell, where a missing db.hello is a
+	// collection object and is therefore truthy. A real helper is a function.
+	HelloEval = `var cmd=(typeof db.hello=="function")?db.hello:db.isMaster; var h=cmd.call(db); print(!!(h.isWritablePrimary||h.ismaster));`
 
 	// PingEval prints 1 when mongod is accepting commands.
 	PingEval = `print(db.runCommand({ping:1}).ok);`

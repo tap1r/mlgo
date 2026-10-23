@@ -48,3 +48,12 @@ func TestInitiateEval(t *testing.T) {
 		t.Fatalf("eval = %s", eval)
 	}
 }
+
+func TestHelloEvalChecksForAFunction(t *testing.T) {
+	if strings.Contains(HelloEval, "(db.hello||db.isMaster)") {
+		t.Fatalf("a legacy collection named hello is truthy: %s", HelloEval)
+	}
+	if !strings.Contains(HelloEval, `typeof db.hello=="function"`) || !strings.Contains(HelloEval, "db.isMaster") {
+		t.Fatalf("eval = %s", HelloEval)
+	}
+}
