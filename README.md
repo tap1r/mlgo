@@ -84,7 +84,7 @@ On Linux, and on macOS with mongod older than 8.2, mlgo adds `--fork`. MongoDB 8
 
 ### Shell
 
-`rs.initiate`, `sh.addShard`, and `createUser` run through `mongosh` when it is on `PATH`, otherwise `mongo`. Readiness is `db.hello().isWritablePrimary` when that command exists, otherwise `isMaster`. Initiate and `addShard` are retried. A failed `mongod` is not retried.
+`rs.initiate`, `sh.addShard`, and `createUser` run through `mongosh` when it is on `PATH`, otherwise `mongo`. The script starts with `set -e`, so a failed `mkdir`, `mongod`, or key file stops it. Readiness is `db.hello().isWritablePrimary` when that command exists, otherwise `isMaster`. Initiate and `addShard` are retried. A failed `mongod` is not retried.
 
 ## Data directory
 

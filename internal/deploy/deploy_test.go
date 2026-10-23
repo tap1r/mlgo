@@ -319,6 +319,26 @@ func TestNoForkDetachesAndOmitsFlag(t *testing.T) {
 	}
 }
 
+func TestScriptStopsOnFailure(t *testing.T) {
+	plan, err := BuildStandalone(27017, Options{CWD: t.TempDir(), Shell: "mongosh", Cache: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := plan.Render()
+	if !strings.HasPrefix(script, "#!/bin/sh\nset -e\n") {
+		t.Fatalf("script does not stop on a failed command:\n%s", script)
+	}
+	fork := plan
+	fork.Options.NoFork = true
+	detached := fork.Render()
+	if strings.Contains(detached, "return $?") {
+		t.Fatalf("a failing lsof would abort under set -e:\n%s", detached)
+	}
+	if !strings.Contains(detached, "if lsof ") {
+		t.Fatalf("listen check:\n%s", detached)
+	}
+}
+
 func TestWaitScriptMatchesWholeLine(t *testing.T) {
 	got := waitScript("mongo", 27017, "print(1)", "1", "mongod")
 	if !strings.Contains(got, "grep -q -x -F -- 1") {

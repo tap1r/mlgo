@@ -59,7 +59,7 @@ func formatArgv(argv []string) string {
 // Render returns a shell script for the plan.
 func (p Plan) Render() string {
 	var b strings.Builder
-	b.WriteString("#!/bin/sh\n")
+	b.WriteString("#!/bin/sh\nset -e\n")
 	for _, line := range p.Summary {
 		fmt.Fprintf(&b, "%s\n", line)
 	}
@@ -114,12 +114,16 @@ port_ready() {
   port=$1
   pid=$2
   if command -v lsof >/dev/null 2>&1; then
-    lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
-    return $?
+    if lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
   fi
   if command -v nc >/dev/null 2>&1; then
-    nc -z 127.0.0.1 "$port" >/dev/null 2>&1
-    return $?
+    if nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
   fi
   return 1
 }
