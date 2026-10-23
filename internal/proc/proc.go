@@ -169,7 +169,7 @@ func inWorkspace(p Process, cwd string) bool {
 	if cwd == "" {
 		return false
 	}
-	if p.WorkDir != "" && filepath.Clean(p.WorkDir) == filepath.Clean(cwd) {
+	if p.WorkDir != "" && samePath(p.WorkDir, cwd) {
 		return true
 	}
 	return underData(cwd, p.DBPath) || underData(cwd, p.LogPath)
@@ -179,9 +179,65 @@ func underData(cwd, path string) bool {
 	if path == "" {
 		return false
 	}
-	root := filepath.Clean(filepath.Join(cwd, topology.DataDir))
+	return hasPrefixPath(path, filepath.Join(cwd, topology.DataDir))
+}
+
+// samePath reports whether a and b are the same directory after resolving
+// symlinks. macOS and Windows also compare case-insensitively. A lexical
+// compare treats /tmp and /private/tmp as different directories, so kill
+// and rm miss a server that was started through the other path.
+func samePath(a, b string) bool {
+	a, b = resolvePath(a), resolvePath(b)
+	if a == b {
+		return true
+	}
+	return foldPathCase() && strings.EqualFold(a, b)
+}
+
+func hasPrefixPath(path, root string) bool {
+	path, root = resolvePath(path), resolvePath(root)
+	if path == root {
+		return true
+	}
+	sep := string(filepath.Separator)
+	if strings.HasPrefix(path, root+sep) {
+		return true
+	}
+	return foldPathCase() && strings.HasPrefix(strings.ToLower(path), strings.ToLower(root)+sep)
+}
+
+func foldPathCase() bool {
+	return runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+}
+
+// resolvePath cleans path and evaluates symlinks. When the leaf does not
+// exist, the longest existing ancestor is resolved and the rest is rejoined.
+func resolvePath(path string) string {
 	path = filepath.Clean(path)
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+	if path == "" || path == "." {
+		return path
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	var suffix []string
+	dir := path
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return path
+		}
+		suffix = append(suffix, filepath.Base(dir))
+		resolved, err := filepath.EvalSymlinks(parent)
+		if err != nil {
+			dir = parent
+			continue
+		}
+		for i := len(suffix) - 1; i >= 0; i-- {
+			resolved = filepath.Join(resolved, suffix[i])
+		}
+		return filepath.Clean(resolved)
+	}
 }
 
 // Format groups processes by working directory in a stable order.
@@ -203,7 +259,7 @@ func Format(procs []Process, cwd string) string {
 		label := wd
 		if label == "" {
 			label = "(unknown directory)"
-		} else if filepath.Clean(label) == filepath.Clean(cwd) {
+		} else if samePath(label, cwd) {
 			label += " (current directory)"
 		}
 		fmt.Fprintln(&b, label)

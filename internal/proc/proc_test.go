@@ -58,9 +58,69 @@ func TestFilter(t *testing.T) {
 	if len(byPort) != 1 || byPort[0].PID != 2 {
 		t.Fatalf("port match = %+v", byPort)
 	}
-	// A dot is literal. The old grep path treated it as "any character".
 	if len(Filter(procs, Spec{Criteria: "shard0."})) != 0 {
 		t.Fatal("criteria must not be a regular expression")
+	}
+}
+
+func TestWorkspaceFollowsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating the link needs a privilege this test does not request")
+	}
+	real := t.TempDir()
+	linkParent := t.TempDir()
+	link := filepath.Join(linkParent, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(real, topology.DataDir, "27017")
+	recorded := ParseArgs(1, []string{"mongod", "--port", "27017", "--dbpath", db})
+	if !inWorkspace(recorded, link) {
+		t.Fatalf("real dbpath %q was not in %q (workdir %q)", db, link, recorded.WorkDir)
+	}
+	viaLink := filepath.Join(link, topology.DataDir, "27017")
+	started := ParseArgs(2, []string{"mongod", "--port", "27017", "--dbpath", viaLink})
+	if !inWorkspace(started, real) {
+		t.Fatalf("link dbpath %q was not in %q (workdir %q)", viaLink, real, started.WorkDir)
+	}
+}
+
+func TestWorkspaceFoldsCase(t *testing.T) {
+	if !foldPathCase() {
+		t.Skip("this filesystem compares paths with case")
+	}
+	dir := t.TempDir()
+	base := filepath.Join(dir, "MlgoCase")
+	if err := os.Mkdir(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	folded := filepath.Join(dir, "mlgocase")
+	if _, err := os.Stat(folded); err != nil {
+		t.Skip("filesystem is case sensitive")
+	}
+	if !inWorkspace(Process{WorkDir: base}, folded) {
+		t.Fatalf("%q and %q did not match", base, folded)
+	}
+}
+
+func TestTmpAndPrivateTmpMatch(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("this is the macOS /tmp symlink")
+	}
+	info, err := os.Lstat("/tmp")
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Skip("/tmp is not a symlink")
+	}
+	leaf := "mlgo-workspace-path-missing"
+	p := Process{
+		WorkDir: "/tmp/" + leaf,
+		DBPath:  "/tmp/" + leaf + "/mlgo-data/27017",
+	}
+	if !inWorkspace(p, "/private/tmp/"+leaf) {
+		t.Fatal("/tmp and /private/tmp did not match")
+	}
+	if !underData("/tmp/"+leaf, "/private/tmp/"+leaf+"/mlgo-data/27017") {
+		t.Fatal("dbpath prefix did not follow /tmp")
 	}
 }
 
