@@ -39,6 +39,19 @@ func TestLiveForkRejectedAndDetachedStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := freePort(t)
+	orig := startBackground
+	var pid int
+	t.Cleanup(func() {
+		startBackground = orig
+		var pids []int
+		if pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGTERM)
+			pids = append(pids, pid)
+		}
+		pids = append(pids, stopByDBPath(forkDB)...)
+		stopOwned(dir, port)
+		waitDead(pids)
+	})
 	logPath := filepath.Join(dir, "fork.log")
 	fork := exec.Command("mongod",
 		"--port", strconv.Itoa(port),
@@ -56,27 +69,11 @@ func TestLiveForkRejectedAndDetachedStart(t *testing.T) {
 		t.Fatalf("--fork error = %v\n%s", err, out)
 	}
 
-	orig := startBackground
-	var pid int
 	startBackground = func(argv []string, gotPort int, timeout time.Duration) (int, error) {
 		var startErr error
 		pid, startErr = orig(argv, gotPort, timeout)
 		return pid, startErr
 	}
-	t.Cleanup(func() {
-		startBackground = orig
-		if pid > 0 {
-			_ = syscall.Kill(pid, syscall.SIGTERM)
-		}
-		stopOwned(dir, port)
-		deadline := time.Now().Add(20 * time.Second)
-		for pid > 0 && time.Now().Before(deadline) {
-			if syscall.Kill(pid, 0) != nil {
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	})
 	plan, err := BuildStandalone(port, Options{
 		CWD: dir, Cache: "0.5", Shell: "mongosh", NoFork: true,
 	})
@@ -129,6 +126,39 @@ func freePort(t *testing.T) int {
 	port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
 	return port
+}
+
+func stopByDBPath(db string) []int {
+	procs, err := proc.List()
+	if err != nil {
+		return nil
+	}
+	want := filepath.Clean(db)
+	var pids []int
+	for _, p := range procs {
+		if filepath.Clean(p.DBPath) != want {
+			continue
+		}
+		pids = append(pids, p.PID)
+		_ = syscall.Kill(p.PID, syscall.SIGTERM)
+	}
+	return pids
+}
+
+func waitDead(pids []int) {
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		alive := false
+		for _, pid := range pids {
+			if pid > 0 && syscall.Kill(pid, 0) == nil {
+				alive = true
+			}
+		}
+		if !alive {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func stopOwned(dir string, port int) {
