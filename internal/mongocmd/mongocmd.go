@@ -97,8 +97,10 @@ const (
 	// collection object and is therefore truthy. A real helper is a function.
 	HelloEval = `var cmd=(typeof db.hello=="function")?db.hello:db.isMaster; var h=cmd.call(db); print(!!(h.isWritablePrimary||h.ismaster));`
 
-	// PingEval prints 1 when mongod is accepting commands.
-	PingEval = `print(db.runCommand({ping:1}).ok);`
+	// PingEval prints PingToken on its own line when mongod is accepting
+	// commands. A legacy shell's connection error never prints that line.
+	PingEval  = `print(db.runCommand({ping:1}).ok==1?"pong":"down");`
+	PingToken = "pong"
 
 	// CreateUserEval creates the fixed local test user on admin.
 	CreateUserEval = `db.getSiblingDB("admin").createUser({user:"user",pwd:"password",roles:["root"]})`

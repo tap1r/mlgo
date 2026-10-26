@@ -140,17 +140,32 @@ func captureStdout(t *testing.T, fn func() error) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
+	type result struct {
+		body []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		body, err := io.ReadAll(r)
+		done <- result{body, err}
+	}()
 	stdout := os.Stdout
 	os.Stdout = w
-	runErr := fn()
-	w.Close()
-	os.Stdout = stdout
-	body, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
+	var runErr error
+	func() {
+		defer func() {
+			os.Stdout = stdout
+			w.Close()
+		}()
+		runErr = fn()
+	}()
+	got := <-done
+	if got.err != nil {
+		t.Fatal(got.err)
 	}
 	if runErr != nil {
 		t.Fatal(runErr)
 	}
-	return string(body)
+	return string(got.body)
 }

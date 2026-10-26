@@ -97,8 +97,7 @@ type Cluster struct {
 }
 
 // P followed by any number of secondaries, then any number of arbiters or
-// hidden members. The character class is only A and H; a "|" in the string
-// is not a member role.
+// hidden members.
 var rolePattern = regexp.MustCompile(`^PS*[AH]*$`)
 
 // ValidatePort reports whether port can be bound by mongod or mongos.
@@ -132,7 +131,7 @@ func ResolveRoles(cfg string, num int, cfgSet, numSet bool) (string, error) {
 		return "", fmt.Errorf("replica set configuration is empty")
 	}
 	if cfgSet && numSet && len(cfg) != num {
-		return "", fmt.Errorf("configuration %q has %d members but -num is %d", cfg, len(cfg), num)
+		return "", fmt.Errorf("configuration %q has %d members but the member count is %d", cfg, len(cfg), num)
 	}
 	if cfgSet {
 		if err := validateShape(cfg); err != nil {
