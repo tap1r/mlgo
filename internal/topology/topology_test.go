@@ -174,7 +174,7 @@ func TestPlanSharded(t *testing.T) {
 		t.Fatal("expected shard cfg/num conflict")
 	}
 
-	// Hidden members are valid on a shard. The old shard parser rejected H.
+	// Hidden members are valid on a shard.
 	if _, err := PlanSharded(27017, 1, 1, 1, "PSH", true, false); err != nil {
 		t.Fatal(err)
 	}

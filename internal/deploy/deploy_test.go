@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"github.com/kevinadi/mlgo/internal/mongocmd"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,7 +186,7 @@ func TestKeyFileIsRandomAndPrivate(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Standalone auth waits for ping, then createUser. No keyfile on standalone.
-		f := &fake{outputs: []scripted{{out: []byte("1\n")}}}
+		f := &fake{outputs: []scripted{{out: []byte("pong\n")}}}
 		if err := Execute(context.Background(), plan, f, f.sleep); err != nil {
 			t.Fatal(err)
 		}
@@ -281,7 +282,7 @@ func TestNoForkDetachesAndOmitsFlag(t *testing.T) {
 		t.Fatalf("readiness grep is not a whole line:\n%s", script)
 	}
 
-	f := &fake{outputs: []scripted{{out: []byte("true\n")}, {out: []byte("true\n")}, {out: []byte("1\n")}}}
+	f := &fake{outputs: []scripted{{out: []byte("true\n")}, {out: []byte("true\n")}, {out: []byte("pong\n")}}}
 	if err := Execute(context.Background(), plan, f, f.sleep); err != nil {
 		t.Fatal(err)
 	}
@@ -366,5 +367,15 @@ func TestOutputSaysDoesNotTreatFalseAsTrue(t *testing.T) {
 	}
 	if !outputSays([]byte("true\n"), "true") {
 		t.Fatal("expected true")
+	}
+}
+
+func TestWaitScriptChecksShellStatus(t *testing.T) {
+	got := waitScript("mongo", 27017, mongocmd.PingEval, mongocmd.PingToken, "mongod")
+	if !strings.Contains(got, `if out=$(`) || !strings.Contains(got, "grep -q -x -F -- pong") {
+		t.Fatalf("wait script =\n%s", got)
+	}
+	if strings.Contains(got, "grep -q -w 1") {
+		t.Fatalf("wait script matches a bare 1:\n%s", got)
 	}
 }

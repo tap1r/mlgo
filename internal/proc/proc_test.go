@@ -58,7 +58,6 @@ func TestFilter(t *testing.T) {
 	if len(byPort) != 1 || byPort[0].PID != 2 {
 		t.Fatalf("port match = %+v", byPort)
 	}
-	// A dot is literal. The old grep path treated it as "any character".
 	if len(Filter(procs, Spec{Criteria: "shard0."})) != 0 {
 		t.Fatal("criteria must not be a regular expression")
 	}

@@ -334,7 +334,7 @@ func runStep(ctx context.Context, plan Plan, step Step, ex Executor, sleep func(
 	case StepWaitPrimary:
 		return waitReady(ctx, ex, plan.Options.Shell, step.Port, mongocmd.HelloEval, "true", "primary "+step.Label, sleep)
 	case StepWaitPing:
-		return waitReady(ctx, ex, plan.Options.Shell, step.Port, mongocmd.PingEval, "1", step.Label, sleep)
+		return waitReady(ctx, ex, plan.Options.Shell, step.Port, mongocmd.PingEval, mongocmd.PingToken, step.Label, sleep)
 	case StepExec:
 		return runExec(ctx, plan, step, ex, sleep)
 	default:
