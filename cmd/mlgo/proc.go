@@ -15,10 +15,6 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 )
 
-// Process listing, start, and kill still shell out. The behavior is preserved
-// here so the deployment planner can land on its own; the shell is removed in
-// the process-control change.
-
 type MongoProcess struct {
 	Cmdline string
 	Dbpath  string
@@ -63,7 +59,8 @@ func (p *MongoProcess) Get_replset() {
 }
 
 func (p *MongoProcess) Get_workpath() {
-	regexstring := fmt.Sprintf("--(?:db|log)path (.+)/%s/[0-9]+", regexp.QuoteMeta(topology.DataDir))
+	// mongocmd builds these paths with filepath.Join, so Windows uses a backslash.
+	regexstring := fmt.Sprintf(`--(?:db|log)path (.+)[/\\]%s[/\\][0-9]+`, regexp.QuoteMeta(topology.DataDir))
 	re := regexp.MustCompile(regexstring)
 	if match := re.FindStringSubmatch(p.Cmdline); len(match) > 0 {
 		p.Wd = match[1]
