@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,5 +49,22 @@ func stopPid(pid int) {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestProbeErrorIsReported(t *testing.T) {
+	orig := listenProbe
+	listenProbe = func(pid, port int) (bool, error) { return false, errors.New("lsof missing") }
+	t.Cleanup(func() { listenProbe = orig })
+	start := time.Now()
+	pid, err := StartAndWait([]string{"sleep", "30"}, 1, 30*time.Second)
+	if pid > 0 {
+		t.Cleanup(func() { stopPid(pid) })
+	}
+	if err == nil || !strings.Contains(err.Error(), "lsof missing") {
+		t.Fatalf("err = %v", err)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatal("waited out the timeout instead of reporting the probe error")
 	}
 }
