@@ -42,7 +42,7 @@ mlgo rs -cfg PSH                     # primary, secondary, hidden
 mlgo rs -init=false                  # start the processes, do not call rs.initiate
 ```
 
-`-cfg` is `P`, then any number of `S`, then any number of `A` or `H`. When `-cfg` and `-num` are both set, they must describe the same number of members. A configuration with more than 7 voting members is rejected. Members at index 7 and later are non-voting secondaries.
+`-cfg` is `P`, then any number of `S`, then any number of `A` or `H`. When `-cfg` and `-num` are both set, they must describe the same number of members. A configuration with more than 7 voting members is rejected. A secondary at the 8th position or later is non-voting (`votes: 0`, `priority: 0`). Arbiters always vote and count toward the 7-voter limit. Hidden members never vote.
 
 ### Sharded cluster
 
@@ -54,7 +54,7 @@ mlgo sh -num 3 -shardsvr 3 -configsvr 3
 
 `-shardcfg` uses the same role string as `-cfg`. Ports are assigned upward from `-port`: mongos, then each shard, then the config servers.
 
-`--shardsvr` and `--configsvr` come from that plan. A replica set is not given either flag because of its name.
+The planner assigns each process its role, and `--shardsvr` and `--configsvr` come from that role. A replica set started with `rs` never gets either flag, whatever its `-name`.
 
 ### Authentication
 
