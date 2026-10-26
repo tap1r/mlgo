@@ -44,14 +44,24 @@ func StartAndWait(argv []string, port int, timeout time.Duration) (int, error) {
 	go func() { exited <- cmd.Wait() }()
 
 	deadline := time.Now().Add(timeout)
+	probeFailures := 0
 	for {
 		select {
 		case err := <-exited:
 			return 0, exitError(port, err, buf.String(), readTail(argValue(argv, "--logpath"), 4<<10))
 		default:
 		}
-		if pidListening(pid, port) {
+		listening, probeErr := listenProbe(pid, port)
+		if listening {
 			return pid, nil
+		}
+		if probeErr != nil {
+			probeFailures++
+			if probeFailures >= maxProbeFailures {
+				return pid, withDetail(fmt.Errorf("cannot check whether pid %d is listening on port %d: %w; left the process running", pid, port, probeErr), buf.String(), readTail(argValue(argv, "--logpath"), 4<<10))
+			}
+		} else {
+			probeFailures = 0
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -98,20 +108,8 @@ func withDetail(err error, stderr, log string) error {
 }
 
 func pidListening(pid, port int) bool {
-	proc, err := process.NewProcess(int32(pid))
-	if err != nil {
-		return false
-	}
-	conns, err := proc.Connections()
-	if err != nil {
-		return false
-	}
-	for _, conn := range conns {
-		if strings.EqualFold(conn.Status, "LISTEN") && int(conn.Laddr.Port) == port {
-			return true
-		}
-	}
-	return false
+	ok, _ := listenProbe(pid, port)
+	return ok
 }
 
 func argValue(argv []string, name string) string {
@@ -176,4 +174,28 @@ func (t *tailBuf) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.b)
+}
+
+// maxProbeFailures is how many consecutive listen probes may fail (about
+// two seconds) before StartAndWait reports the probe error.
+const maxProbeFailures = 10
+
+// listenProbe reports whether pid listens on port. A process that is not
+// visible yet is not an error; a failing connection probe (for example a
+// missing lsof) is.
+var listenProbe = func(pid, port int) (bool, error) {
+	proc, err := process.NewProcess(int32(pid))
+	if err != nil {
+		return false, nil
+	}
+	conns, err := proc.Connections()
+	if err != nil {
+		return false, err
+	}
+	for _, conn := range conns {
+		if strings.EqualFold(conn.Status, "LISTEN") && int(conn.Laddr.Port) == port {
+			return true, nil
+		}
+	}
+	return false, nil
 }
