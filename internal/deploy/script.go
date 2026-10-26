@@ -63,7 +63,7 @@ func (p Plan) Render() string {
 		case StepWaitPrimary:
 			fmt.Fprintln(&b, waitScript(p.Options.Shell, step.Port, mongocmd.HelloEval, "true", "primary "+step.Label))
 		case StepWaitPing:
-			fmt.Fprintln(&b, waitScript(p.Options.Shell, step.Port, mongocmd.PingEval, "1", step.Label))
+			fmt.Fprintln(&b, waitScript(p.Options.Shell, step.Port, mongocmd.PingEval, mongocmd.PingToken, step.Label))
 		case StepExec:
 			line := formatArgv(CommandArgv(step, p.Options.Windows))
 			if step.Retries > 0 {
@@ -106,7 +106,7 @@ func waitScript(shell string, port int, eval, want, label string) string {
 ok=0
 i=0
 while [ "$i" -lt 20 ]; do
-  if %s | grep -q -w %s; then
+  if out=$(%s 2>/dev/null) && printf '%%s\n' "$out" | grep -q -x %s; then
     ok=1
     break
   fi
