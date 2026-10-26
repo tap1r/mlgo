@@ -42,7 +42,11 @@ func run(args []string) error {
 		if err := extraArgs(args); err != nil {
 			return err
 		}
-		return proc.Kill(killSpec(args))
+		spec, err := killSpec(args)
+		if err != nil {
+			return err
+		}
+		return proc.Kill(spec)
 	case "rm":
 		if len(args) > 1 {
 			return fmt.Errorf("unexpected argument %q", args[1])
@@ -217,8 +221,7 @@ func extraArgs(args []string) error {
 func printProcesses() error {
 	procs, err := proc.List()
 	if err != nil {
-		fmt.Println("No running processes")
-		return nil
+		return err
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -228,15 +231,18 @@ func printProcesses() error {
 	return nil
 }
 
-func killSpec(args []string) proc.Spec {
+func killSpec(args []string) (proc.Spec, error) {
 	if len(args) < 2 {
-		cwd, _ := os.Getwd()
-		return proc.Spec{CWD: cwd}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return proc.Spec{}, err
+		}
+		return proc.Spec{CWD: cwd}, nil
 	}
 	if args[1] == "all" {
-		return proc.Spec{All: true}
+		return proc.Spec{All: true}, nil
 	}
-	return proc.Spec{Criteria: args[1]}
+	return proc.Spec{Criteria: args[1]}, nil
 }
 
 func usage() string {
