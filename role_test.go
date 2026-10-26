@@ -48,8 +48,19 @@ func TestReplSetInitUsesPlanner(t *testing.T) {
 	if rs.Num != 3 || rs.Config != "PSH" {
 		t.Fatalf("num=%d cfg=%s", rs.Num, rs.Config)
 	}
-	joined := strings.Join(rs.Cmdlines[len(rs.Cmdlines)-1], " ")
-	if !strings.Contains(joined, `"hidden":true`) || !strings.Contains(joined, `"votes":0`) {
+	initArgv := rs.Cmdlines[len(rs.Cmdlines)-1]
+	joined := strings.Join(initArgv, " ")
+	if !strings.Contains(joined, "hidden:true") || !strings.Contains(joined, "votes:0") {
 		t.Fatalf("initiate command = %s", joined)
+	}
+
+	// The rendered script line must keep the eval as one shell word.
+	script := strings.TrimSpace(Util_cmd_script([][]string{initArgv}))
+	eval := initArgv[len(initArgv)-1]
+	if strings.Contains(eval, `"`) {
+		t.Fatalf("eval contains a double quote: %s", eval)
+	}
+	if !strings.HasSuffix(script, `"`+eval+`"`) || strings.Count(script, `"`) != 2 {
+		t.Fatalf("script line = %s", script)
 	}
 }

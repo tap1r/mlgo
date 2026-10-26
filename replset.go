@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -25,7 +24,6 @@ type ReplSet struct {
 	Cmdlines    [][]string
 	Script      bool
 	Noinit      bool
-	SvrRole     topology.ServerRole
 }
 
 func (rs *ReplSet) Init(num int, port int, config string, cfgSet bool, numSet bool, replsetname string, auth bool, noinit bool, script bool, role topology.ServerRole) error {
@@ -33,7 +31,6 @@ func (rs *ReplSet) Init(num int, port int, config string, cfgSet bool, numSet bo
 	if err != nil {
 		return err
 	}
-	plan.Role = role
 
 	rs.Num = len(plan.Members)
 	rs.ReplSetName = plan.Name
@@ -42,7 +39,6 @@ func (rs *ReplSet) Init(num int, port int, config string, cfgSet bool, numSet bo
 	rs.Config = plan.Config
 	rs.Script = script
 	rs.Noinit = noinit
-	rs.SvrRole = role
 	rs.Connstr = topology.ConnString(plan.Name, plan.Members)
 
 	for _, member := range plan.Members {
@@ -74,19 +70,38 @@ func (rs *ReplSet) Cmd_mongod() [][]string {
 }
 
 func (rs *ReplSet) cmdInit(members []topology.Member) ([]string, error) {
-	docs := make([]map[string]any, 0, len(members))
+	docs := make([]string, 0, len(members))
 	for _, member := range members {
-		docs = append(docs, member.Doc())
+		docs = append(docs, jsMember(member))
 	}
-	raw, err := json.Marshal(map[string]any{
-		"_id":     rs.ReplSetName,
-		"members": docs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	eval := "rs.initiate(" + string(raw) + ")"
+	eval := fmt.Sprintf("rs.initiate({_id:%s, members:[%s]})", jsString(rs.ReplSetName), strings.Join(docs, ", "))
 	return []string{"mongo", "--port", strconv.Itoa(rs.Port), "--eval", eval}, nil
+}
+
+// jsMember renders a member document as JavaScript with single-quoted
+// strings, so the eval contains no double quotes. Util_cmd_script wraps the
+// argument in double quotes, and cmd.exe toggles quoting on them.
+func jsMember(m topology.Member) string {
+	fields := []string{fmt.Sprintf("_id:%d", m.ID), "host:" + jsString(m.Host)}
+	if m.Priority != nil {
+		fields = append(fields, fmt.Sprintf("priority:%d", *m.Priority))
+	}
+	if m.Votes != nil {
+		fields = append(fields, fmt.Sprintf("votes:%d", *m.Votes))
+	}
+	if m.Arbiter {
+		fields = append(fields, "arbiterOnly:true")
+	}
+	if m.Hidden {
+		fields = append(fields, "hidden:true")
+	}
+	return "{" + strings.Join(fields, ", ") + "}"
+}
+
+func jsString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "'", `\'`)
+	return "'" + s + "'"
 }
 
 func (rs *ReplSet) Wait_for_primary() {
