@@ -134,14 +134,14 @@ func detachScript(step Step) string {
 		name = filepath.Base(argv[0])
 	}
 	log := flagValue(argv, "--logpath")
-	redir := ">/dev/null 2>&1"
+	redir := "</dev/null >/dev/null 2>&1"
 	tail := ""
 	if log != "" {
 		// Keep early stderr off --logpath. mongod renames or truncates that
 		// file when it opens it, which drops the lines we just appended.
 		launch := shellquote.Quote(log + ".launch")
 		quoted := shellquote.Quote(log)
-		redir = ">>" + launch + " 2>&1"
+		redir = "</dev/null >>" + launch + " 2>&1"
 		tail = "\n    tail -n 40 " + launch + " >&2\n    tail -n 40 " + quoted + " >&2"
 	}
 	return fmt.Sprintf(`echo "Starting %s on port %d..."
